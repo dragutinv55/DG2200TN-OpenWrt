@@ -1,0 +1,54 @@
+#!/bin/sh
+set -eu
+
+EXPECTED_SIZE=72220813
+
+usage()
+{
+	echo "Usage: dg2200tn-install-rui RUI_FILE [INSTALL]" >&2
+	echo "Without INSTALL, the image is inspected but not flashed." >&2
+	exit 2
+}
+
+[ "$#" -ge 1 ] && [ "$#" -le 2 ] || usage
+
+RUI_FILE="$1"
+case "$RUI_FILE" in
+	/*) ;;
+	*) echo "error: use an absolute RUI path" >&2; exit 1 ;;
+esac
+case "$RUI_FILE" in
+	*[!A-Za-z0-9_./:-]*)
+		echo "error: unsupported character in RUI path" >&2
+		exit 1
+		;;
+esac
+
+[ -f "$RUI_FILE" ] || {
+	echo "error: RUI file not found: $RUI_FILE" >&2
+	exit 1
+}
+
+ACTUAL_SIZE="$(wc -c < "$RUI_FILE")"
+[ "$ACTUAL_SIZE" -eq "$EXPECTED_SIZE" ] || {
+	echo "error: unexpected RUI size: $ACTUAL_SIZE (expected $EXPECTED_SIZE)" >&2
+	exit 1
+}
+
+echo "Inspecting $RUI_FILE"
+/bin/rui info -r "$RUI_FILE"
+/bin/rui verify -r "$RUI_FILE"
+
+if [ "${2:-}" != "INSTALL" ]; then
+	echo
+	echo "Image validation completed. No NAND write was started."
+	echo "To install, run:"
+	echo "dg2200tn-install-rui $RUI_FILE INSTALL"
+	exit 0
+fi
+
+echo
+echo "Starting the stock firmware updater."
+echo "Do not disconnect power for at least 10 minutes."
+sync
+exec /bin/pcb_cli -l "UsbUpgrade.doUsbUpgrade(\"$RUI_FILE\")"

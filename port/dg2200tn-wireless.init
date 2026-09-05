@@ -1,0 +1,177 @@
+#!/bin/sh /etc/rc.common
+
+START=18
+
+module_is_builtin()
+{
+	local module="$1"
+
+	grep -q "/$module\\.ko$" \
+		"/lib/modules/$(uname -r)/modules.builtin" 2>/dev/null
+}
+
+load_module()
+{
+	local module="$1"
+	local module_name
+	local path
+
+	module_name="$(printf '%s' "$module" | tr '-' '_')"
+	grep -q "^$module_name " /proc/modules && return 0
+	[ -d "/sys/module/$module_name" ] && return 0
+	module_is_builtin "$module" && return 0
+	# The built-in brcmfmac image links the BCA provider into the main driver.
+	[ "$module" = "brcmfmac-bca" ] &&
+		module_is_builtin brcmfmac && return 0
+	path="$(find "/lib/modules/$(uname -r)" -name "$module.ko" | head -n 1)"
+	[ -n "$path" ] || {
+		logger -t dg2200tn-wireless "missing module $module"
+		return 1
+	}
+	insmod "$path"
+}
+
+is_generated_wireless_config()
+{
+	local radio0_ssid
+	local radio1_ssid
+
+	[ "$(uci -q get wireless.default_radio0.disabled)" = "1" ] &&
+		[ "$(uci -q get wireless.default_radio1.disabled)" = "1" ] ||
+		return 1
+	radio0_ssid="$(uci -q get wireless.default_radio0.ssid)"
+	radio1_ssid="$(uci -q get wireless.default_radio1.ssid)"
+	[ "$radio0_ssid:$radio1_ssid" = "OpenWrt:OpenWrt" ] ||
+		[ "$radio0_ssid:$radio1_ssid" = "OpenWrt-2G:OpenWrt-5G" ]
+}
+
+configure_wireless()
+{
+	local key
+	local section
+
+	uci -q batch <<EOF
+set network.@device[0].bridge_empty='1'
+set network.lan.device='br-lan'
+set network.lan.force_link='1'
+delete network.br_wifi
+delete network.wifi
+delete dhcp.wifi
+EOF
+	uci commit network
+	uci commit dhcp
+	uci -q del_list firewall.@zone[0].network='wifi'
+	uci commit firewall
+
+	[ -s /etc/config/wireless ] || wifi config
+	for section in default_radio0 default_radio1; do
+		[ "$(uci -q get wireless.$section)" = "wifi-iface" ] || continue
+		uci set wireless.$section.network='lan'
+	done
+	uci commit wireless
+	if uci show wireless | grep -q "ssid='DG2200TN-"; then
+		uci -q delete wireless.default_radio0.disabled
+		uci -q delete wireless.default_radio1.disabled
+		uci set wireless.radio0.disabled='0'
+		uci set wireless.radio1.disabled='0'
+		uci commit wireless
+		return 0
+	fi
+	if uci show wireless | grep -q '=wifi-iface' &&
+	   ! is_generated_wireless_config; then
+		return 0
+	fi
+
+	key="$(hexdump -n 12 -e '12/1 "%02x"' /dev/urandom)"
+	uci -q batch <<EOF
+set wireless.default_radio0=wifi-iface
+set wireless.default_radio0.device='radio0'
+set wireless.default_radio0.mode='ap'
+set wireless.default_radio0.network='lan'
+set wireless.default_radio0.ssid='DG2200TN-2G'
+set wireless.default_radio0.encryption='psk2'
+set wireless.default_radio0.key='$key'
+delete wireless.default_radio0.disabled
+set wireless.default_radio1=wifi-iface
+set wireless.default_radio1.device='radio1'
+set wireless.default_radio1.mode='ap'
+set wireless.default_radio1.network='lan'
+set wireless.default_radio1.ssid='DG2200TN-5G'
+set wireless.default_radio1.encryption='psk2'
+set wireless.default_radio1.key='$key'
+delete wireless.default_radio1.disabled
+set wireless.radio0.disabled='0'
+set wireless.radio1.disabled='0'
+EOF
+	uci commit wireless
+}
+
+start()
+{
+	local pci_autoprobe="/sys/bus/pci/drivers_autoprobe"
+
+	load_module scsi_common
+	load_module bsg
+	load_module scsi_mod
+	load_module sd_mod
+	load_module usb-storage
+
+	load_module llc || return 1
+	load_module stp || return 1
+	load_module ipv6 || return 1
+	load_module bridge || return 1
+
+	load_module nfnetlink || return 1
+	load_module nf_tables || return 1
+	load_module nft_fib || return 1
+	load_module nft_fib_ipv4 || return 1
+	load_module nft_fib_ipv6 || return 1
+	load_module nft_fib_inet || return 1
+	load_module nf_reject_ipv6 || return 1
+	load_module nft_reject || return 1
+	load_module nft_reject_ipv4 || return 1
+	load_module nft_reject_ipv6 || return 1
+	load_module nft_reject_inet || return 1
+	load_module nft_ct || return 1
+	load_module nft_limit || return 1
+	load_module nft_nat || return 1
+	load_module nft_chain_nat || return 1
+	load_module nft_masq || return 1
+	load_module nft_log || return 1
+	load_module nft_quota || return 1
+	load_module nft_numgen || return 1
+	load_module nft_redir || return 1
+	load_module nft_hash || return 1
+	load_module x_tables || return 1
+	load_module xt_tcpudp || return 1
+
+	load_module cfg80211 || return 1
+	load_module libarc4 || return 1
+	load_module mac80211 || return 1
+	load_module b43 || return 1
+	load_module brcmutil || return 1
+
+	if [ -w "$pci_autoprobe" ]; then
+		echo 0 > "$pci_autoprobe"
+		load_module brcmfmac || {
+			echo 1 > "$pci_autoprobe"
+			return 1
+		}
+		load_module brcmfmac-bca || {
+			echo 1 > "$pci_autoprobe"
+			return 1
+		}
+		if [ ! -e /sys/bus/pci/devices/0001:01:00.0/driver ]; then
+			echo 0001:01:00.0 > /sys/bus/pci/drivers/brcmfmac/bind || {
+				echo 1 > "$pci_autoprobe"
+				return 1
+			}
+		fi
+		echo 1 > "$pci_autoprobe"
+	else
+		load_module brcmfmac || return 1
+		load_module brcmfmac-bca || return 1
+	fi
+
+	configure_wireless
+}

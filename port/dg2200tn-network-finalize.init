@@ -1,0 +1,27 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+
+start()
+{
+	local waited=0
+
+	# netifd may generate its disabled defaults after the early driver loader.
+	# Reapply the board AP configuration once network initialization is ready.
+	/etc/init.d/dg2200tn-wireless start
+	/etc/init.d/network reload
+
+	while [ "$waited" -lt 30 ]; do
+		[ -e /sys/class/net/br-lan/brif/phy0-ap0 ] &&
+			[ -e /sys/class/net/br-lan/brif/phy1-ap0 ] && break
+		sleep 1
+		waited=$((waited + 1))
+	done
+
+	/etc/init.d/dnsmasq restart
+}
+
+boot()
+{
+	start
+}

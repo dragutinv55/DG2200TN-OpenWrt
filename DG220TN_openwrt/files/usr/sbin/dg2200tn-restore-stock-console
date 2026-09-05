@@ -1,0 +1,59 @@
+#!/bin/sh
+set -eu
+
+MOUNT=/mnt/dg2200tn-stock
+
+MTD_NUM="$(awk '$4 == "\"ubi-bank1\"" {
+	name = $1
+	sub(/^mtd/, "", name)
+	sub(/:$/, "", name)
+	print name
+	exit
+}' /proc/mtd)"
+[ -n "$MTD_NUM" ] || {
+	echo "error: ubi-bank1 was not found in /proc/mtd" >&2
+	exit 1
+}
+
+UBI_NUM=0
+while [ -e "/sys/class/ubi/ubi$UBI_NUM" ]; do
+	UBI_NUM=$((UBI_NUM + 1))
+done
+
+mkdir -p "$MOUNT"
+/usr/sbin/ubiattach /dev/ubi_ctrl -m "$MTD_NUM" -d "$UBI_NUM"
+
+cleanup()
+{
+	umount "$MOUNT" 2>/dev/null || true
+	/usr/sbin/ubidetach /dev/ubi_ctrl -d "$UBI_NUM" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+VOLUME=
+for node in /sys/class/ubi/ubi"$UBI_NUM"_*; do
+	[ -f "$node/name" ] || continue
+	case "$(cat "$node/name")" in
+		rootfs_ubifs|rootfs)
+			VOLUME="/dev/$(basename "$node")"
+			break
+			;;
+	esac
+done
+[ -n "$VOLUME" ] || {
+	echo "error: stock root filesystem volume was not found" >&2
+	exit 1
+}
+
+mount -t ubifs "$VOLUME" "$MOUNT"
+
+INITTAB="$MOUNT/etc/inittab"
+[ -f "$INITTAB.dg2200tn-backup" ] || {
+	echo "error: no DG2200TN console backup was found" >&2
+	exit 1
+}
+
+cp -p "$INITTAB.dg2200tn-backup" "$INITTAB"
+rm -f "$MOUNT/usr/sbin/dg2200tn-install-rui"
+sync
+echo "Original stock console configuration restored."

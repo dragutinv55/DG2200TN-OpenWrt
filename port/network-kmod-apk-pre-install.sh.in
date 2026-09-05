@@ -1,0 +1,28 @@
+#!/bin/sh
+
+[ -n "${IPKG_INSTROOT:-}" ] && exit 0
+
+expected_release="@KERNEL_RELEASE@"
+expected_version="@KERNEL_UNAME_VERSION@"
+expected_builtins="@BUILTINS_SHA256@"
+module_root="/lib/modules/$expected_release"
+
+fail() {
+	echo "@PACKAGE_NAME@: $*" >&2
+	exit 1
+}
+
+[ "$(uname -r)" = "$expected_release" ] ||
+	fail "requires DG2200TN kernel $expected_release"
+[ "$(uname -v)" = "$expected_version" ] ||
+	fail "requires the published DG2200TN kernel build @KERNEL_BUILD@"
+[ "$(tr '\000' '\n' </proc/device-tree/model 2>/dev/null | head -n 1)" = "DG2200TN" ] ||
+	fail "this package is only for DG2200TN"
+[ -f "$module_root/modules.builtin" ] ||
+	fail "missing kernel ABI marker modules.builtin"
+
+actual_builtins="$(sha256sum "$module_root/modules.builtin" | cut -d ' ' -f 1)"
+[ "$actual_builtins" = "$expected_builtins" ] ||
+	fail "modules.builtin does not match the supported firmware"
+
+exit 0

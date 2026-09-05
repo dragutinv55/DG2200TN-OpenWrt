@@ -1,0 +1,28 @@
+#!/bin/sh
+
+[ "${IPKG_NO_SCRIPT:-0}" = "1" ] && exit 0
+
+functions="${IPKG_INSTROOT:-}/lib/functions.sh"
+[ -s "$functions" ] || {
+	echo "@PACKAGE_NAME@: missing $functions" >&2
+	exit 1
+}
+
+. "$functions"
+export root="${IPKG_INSTROOT:-}"
+export pkgname="@PACKAGE_NAME@"
+
+default_postinst || exit $?
+
+if [ -z "${IPKG_INSTROOT:-}" ]; then
+	/etc/init.d/@SERVICE_NAME@ start || exit $?
+	while IFS='|' read -r name path parameters; do
+		[ -n "$name" ] || continue
+		[ -d "/sys/module/$name" ] || {
+			echo "@PACKAGE_NAME@: module $name did not load; check dmesg" >&2
+			exit 1
+		}
+	done < "/usr/lib/dg2200tn-kmods/@SERVICE_NAME@.modules"
+fi
+
+exit 0

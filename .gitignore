@@ -1,0 +1,59 @@
+# Generated OpenWrt data
+/DG220TN_openwrt/bin/
+/DG220TN_openwrt/build_dir/
+/DG220TN_openwrt/dl/
+/DG220TN_openwrt/feeds/
+/DG220TN_openwrt/package/feeds/
+/DG220TN_openwrt/staging_dir/
+/DG220TN_openwrt/tmp/
+/DG220TN_openwrt/package/kernel/gpio-button-hotplug/src/.*.cmd
+/DG220TN_openwrt/package/kernel/gpio-button-hotplug/src/Module.symvers
+/DG220TN_openwrt/package/kernel/gpio-button-hotplug/src/*.ko
+/DG220TN_openwrt/package/kernel/gpio-button-hotplug/src/*.mod
+/DG220TN_openwrt/package/kernel/gpio-button-hotplug/src/*.mod.c
+/DG220TN_openwrt/package/kernel/gpio-button-hotplug/src/modules.order
+
+# Custom kernel build products
+/port/src/linux-6.12/Module.symvers
+/port/src/linux-6.12/arch/arm/boot/Image
+/port/src/linux-6.12/arch/arm/boot/zImage
+/port/src/linux-6.12/arch/arm/boot/dts/broadcom/*.dtb
+/port/.config.stock-rui-backup
+/port/.config.wireguard-backup
+/port/.config.network-kmods-backup
+/port/.config.sqm-userspace-backup
+/port/.config.sqm-userspace-candidate
+/port/.config.sqm-kernel-backup
+/port/jffs2_out
+/port/vendor-bcm63138/vendor-bcm63138
+/port/vendor-bcm63138/extern/broadcom-bsp-4.16L05/shared/broadcom
+
+# Local alternate bootfs copies
+/port/images/openwrt-dg2200tn-cfe-bootfs-normal.wfi
+/port/images/openwrt-dg2200tn-cfe-bootfs-normal.wfi.sha256
+/port/images/openwrt-dg2200tn-cfe-bootfs-rescue.wfi
+/port/images/openwrt-dg2200tn-cfe-bootfs-rescue.wfi.sha256
+
+# Development images; the staged UART files below are the published flash set
+/port/images/openwrt-dg2200tn-cfe.wfi
+/port/images/openwrt-dg2200tn-cfe.wfi.sha256
+/port/images/openwrt-dg2200tn-cfe-bootfs-repair.wfi
+/port/images/openwrt-dg2200tn-cfe-bootfs-repair.wfi.sha256
+/port/images/openwrt-dg2200tn-cfe-rootfs.bin
+/port/images/openwrt-dg2200tn-cfe-rootfs.bin.sha256
+/port/images/openwrt-dg2200tn-recovery-installer.elf
+/port/images/openwrt-dg2200tn-recovery-installer.elf.sha256
+/port/images/openwrt-dg2200tn-usb.rui
+/port/images/openwrt-dg2200tn-usb.rui.sha256
+
+# Local firmware and hardware dumps
+/port/tftp/
+/port/firmware/
+/port/build/
+/.nand-dumps/
+*.oob
+*.checkpoint.json
+
+# Python caches
+__pycache__/
+*.pyc

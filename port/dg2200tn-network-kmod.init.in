@@ -1,0 +1,44 @@
+#!/bin/sh /etc/rc.common
+
+START=@START@
+STOP=10
+
+MODULE_ROOT="/lib/modules/6.12.0"
+MODULE_MANIFEST="/usr/lib/dg2200tn-kmods/@SERVICE_NAME@.modules"
+
+load_module() {
+	name="$1"
+	path="$2"
+	parameters="$3"
+
+	[ -d "/sys/module/$name" ] && return 0
+	if [ -n "$parameters" ]; then
+		/sbin/insmod "$MODULE_ROOT/$path" $parameters && return 0
+	else
+		/sbin/insmod "$MODULE_ROOT/$path" && return 0
+	fi
+
+	logger -t @SERVICE_NAME@ \
+		"failed to load $name from $MODULE_ROOT/$path"
+	return 1
+}
+
+start() {
+	[ -r "$MODULE_MANIFEST" ] || {
+		logger -t @SERVICE_NAME@ "missing $MODULE_MANIFEST"
+		return 1
+	}
+
+	while IFS='|' read -r name path parameters; do
+		[ -n "$name" ] || continue
+		load_module "$name" "$path" "$parameters" || return 1
+	done < "$MODULE_MANIFEST"
+}
+
+stop() {
+	return 0
+}
+
+reload() {
+	start
+}

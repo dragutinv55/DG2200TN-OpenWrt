@@ -1,0 +1,20 @@
+#!/bin/sh
+
+[ -s /etc/config/wireless ] || wifi config
+
+uci -q batch <<'EOF'
+set wireless.radio0.channel='1'
+set wireless.radio0.htmode='NOHT'
+set wireless.default_radio0.ssid='OpenWrt-2G'
+set wireless.default_radio0.disabled='1'
+set wireless.default_radio0.wps_pushbutton='1'
+
+set wireless.radio1.channel='36'
+set wireless.radio1.htmode='VHT80'
+set wireless.default_radio1.ssid='OpenWrt-5G'
+set wireless.default_radio1.disabled='1'
+set wireless.default_radio1.wps_pushbutton='1'
+EOF
+
+uci commit wireless
+exit 0

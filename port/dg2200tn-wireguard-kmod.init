@@ -1,0 +1,44 @@
+#!/bin/sh /etc/rc.common
+
+START=19
+STOP=10
+
+MODULE_ROOT="/lib/modules/6.12.0"
+
+load_module() {
+	name="$1"
+	path="$2"
+
+	grep -q "^$name " /proc/modules && return 0
+	/sbin/insmod "$MODULE_ROOT/$path" && return 0
+
+	logger -t dg2200tn-wireguard-kmod \
+		"failed to load $name from $MODULE_ROOT/$path"
+	return 1
+}
+
+start() {
+	load_module ipv6 kernel/net/ipv6/ipv6.ko || return 1
+	load_module chacha_neon kernel/arch/arm/crypto/chacha-neon.ko ||
+		return 1
+	load_module poly1305_arm kernel/arch/arm/crypto/poly1305-arm.ko ||
+		return 1
+	load_module libchacha20poly1305 \
+		kernel/lib/crypto/libchacha20poly1305.ko || return 1
+	load_module libcurve25519_generic \
+		kernel/lib/crypto/libcurve25519-generic.ko || return 1
+	load_module libcurve25519 kernel/lib/crypto/libcurve25519.ko ||
+		return 1
+	load_module udp_tunnel kernel/net/ipv4/udp_tunnel.ko || return 1
+	load_module ip6_udp_tunnel kernel/net/ipv6/ip6_udp_tunnel.ko ||
+		return 1
+	load_module wireguard kernel/drivers/net/wireguard/wireguard.ko
+}
+
+stop() {
+	return 0
+}
+
+reload() {
+	start
+}

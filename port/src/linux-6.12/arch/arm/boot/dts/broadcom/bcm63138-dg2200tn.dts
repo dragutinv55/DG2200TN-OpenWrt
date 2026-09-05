@@ -1,0 +1,238 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * DG2200TN DSL gateway (BCM63138B0)
+ *
+ * Stage 1 bring-up DTS: console + NAND only.
+ * Ethernet (bcmsysport), PCIe and the LAN switch are not described yet
+ * because their register maps are not in mainline; they must be harvested
+ * from the running vendor kernel (/proc/iomem, /proc/interrupts).
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include "bcm63138.dtsi"
+
+/ {
+	compatible = "brcm,bcm63138", "brcm,bcmbca";
+	model = "DG2200TN";
+
+	chosen {
+		bootargs = "console=ttyS0,115200 earlyprintk";
+		stdout-path = &serial0;
+	};
+
+	/*
+	 * The board has 512 MB, but CFE carves out MC/TM/DHD reservations
+	 * (4 + 44 + 14 MB) from the top. Only 256 MB is claimed here so the
+	 * first RAM boot cannot collide with those regions.
+	 */
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x10000000>;
+	};
+
+	misc: syscon@fffe8180 {
+		compatible = "syscon";
+		reg = <0xfffe8180 0x80>;
+	};
+
+	buttons {
+		compatible = "gpio-keys-polled";
+		poll-interval = <20>;
+
+		reset {
+			label = "reset";
+			linux,code = <KEY_RESTART>;
+			gpios = <&gpio1 3 GPIO_ACTIVE_LOW>;
+			debounce-interval = <60>;
+		};
+
+		wps {
+			label = "wps";
+			linux,code = <KEY_WPS_BUTTON>;
+			gpios = <&gpio1 1 GPIO_ACTIVE_LOW>;
+			debounce-interval = <60>;
+		};
+	};
+
+	pcie0: pcie@80060000 {
+		compatible = "brcm,bcm63138-pcie";
+		reg = <0x80060000 0x10000>;
+		power-domains = <&pmb0 BCM_PMB_PCIE0>;
+		brcm,misc = <&misc>;
+		brcm,pcie-index = <0>;
+		device_type = "pci";
+		#address-cells = <3>;
+		#size-cells = <2>;
+		#interrupt-cells = <1>;
+		bus-range = <0x0 0xff>;
+		ranges = <0x02000000 0x0 0x90000000
+			  0x90000000 0x0 0x10000000>;
+		dma-ranges = <0x02000000 0x0 0x00000000
+			      0x00000000 0x0 0x20000000>;
+		interrupt-map-mask = <0x0 0x0 0x0 0x7>;
+		interrupt-map = <0x0 0x0 0x0 0x1 &gic
+				 GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	pcie1: pcie@80070000 {
+		compatible = "brcm,bcm63138-pcie";
+		reg = <0x80070000 0x10000>;
+		power-domains = <&pmb0 BCM_PMB_PCIE1>;
+		brcm,misc = <&misc>;
+		brcm,pcie-index = <1>;
+		device_type = "pci";
+		#address-cells = <3>;
+		#size-cells = <2>;
+		#interrupt-cells = <1>;
+		bus-range = <0x0 0xff>;
+		ranges = <0x02000000 0x0 0xa0000000
+			  0xa0000000 0x0 0x10000000>;
+		dma-ranges = <0x02000000 0x0 0x00000000
+			      0x00000000 0x0 0x20000000>;
+		interrupt-map-mask = <0x0 0x0 0x0 0x7>;
+		interrupt-map = <0x0 0x0 0x0 0x1 &gic
+				 GIC_SPI 61 IRQ_TYPE_LEVEL_HIGH>;
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		rdp_dma_pool: rdp-dma-pool {
+			compatible = "shared-dma-pool";
+			reg = <0x0d000000 0x01800000>;
+			reusable;
+		};
+	};
+};
+
+&serial0 {
+	status = "okay";
+};
+
+&rdp {
+	memory-region = <&rdp_dma_pool>;
+	brcm,sf2 = <&sf2>;
+	phy-handle = <&wan_phy>;
+	phy-mode = "gmii";
+	status = "okay";
+};
+
+&sf2 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	wan_phy: ethernet-phy@c {
+		reg = <12>;
+	};
+};
+
+&serial1 {
+	status = "okay";
+};
+
+&hsspi {
+	status = "okay";
+};
+
+&usb_phy {
+	status = "okay";
+};
+
+&ehci {
+	status = "okay";
+};
+
+&ohci {
+	status = "okay";
+};
+
+&xhci {
+	status = "okay";
+};
+
+&nand_controller {
+	brcm,wp-not-connected;
+	status = "okay";
+};
+
+/*
+ * Hynix 0xadda, 256 MB, 2048-byte pages, 128 KB erase blocks,
+ * 64-byte spare = 4 sectors x 16 bytes, BCH-4.
+ *
+ * Deliberately no nand-on-flash-bbt: CFE maintains its own bad block table
+ * in a Broadcom-specific format, and letting Linux write a BBT of its own
+ * clobbers the last eraseblocks of the chip. Scan in memory each boot instead.
+ */
+&nandcs {
+	nand-ecc-strength = <4>;
+	nand-ecc-step-size = <512>;
+	brcm,nand-oob-sector-size = <16>;
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		partition@0 {
+			label = "cfe";
+			reg = <0x00000000 0x00020000>;
+			read-only;
+		};
+
+		partition@20000 {
+			label = "boot";
+			reg = <0x00020000 0x00420000>;
+		};
+
+		partition@440000 {
+			label = "ubi-bank1";
+			/*
+			 * The stock firmware image reserves 0x040c0000 bytes
+			 * after bootfs for the root UBI image. Keep the remainder
+			 * of CFE partition 1 outside this MTD device so stale stock
+			 * UBI layout blocks cannot override an installed image.
+			 */
+			reg = <0x00440000 0x040c0000>;
+		};
+
+		partition@4500000 {
+			label = "boot-bank2";
+			reg = <0x04500000 0x00520000>;
+			read-only;
+		};
+
+		partition@4a20000 {
+			label = "ubi-bank2";
+			reg = <0x04a20000 0x03fc0000>;
+		};
+
+		partition@89e0000 {
+			label = "bank2-tail";
+			reg = <0x089e0000 0x00020000>;
+			read-only;
+		};
+
+		partition@8a00000 {
+			label = "persistent-ubi-writable";
+			/*
+			 * Header scan: image_seq 1623297617 starts at 0x08a00000
+			 * and continues through 896 PEBs to 0x0fa00000.
+			 * This device contains the user (/cfg), ext and perm
+			 * volumes used by the stock firmware.
+			 */
+			reg = <0x08a00000 0x07000000>;
+		};
+
+		partition@fa00000 {
+			label = "nand-tail";
+			reg = <0x0fa00000 0x00600000>;
+			read-only;
+		};
+	};
+};

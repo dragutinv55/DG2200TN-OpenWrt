@@ -1,0 +1,93 @@
+#!/bin/sh
+set -eu
+
+MOUNT=/mnt/dg2200tn-stock
+HELPER=/usr/libexec/dg2200tn-stock-install-rui
+
+[ "$(id -u)" -eq 0 ] || {
+	echo "error: this command must run as root" >&2
+	exit 1
+}
+[ -x "$HELPER" ] || {
+	echo "error: stock installer helper is missing from this recovery image" >&2
+	exit 1
+}
+
+MTD_NUM="$(awk '$4 == "\"ubi-bank1\"" {
+	name = $1
+	sub(/^mtd/, "", name)
+	sub(/:$/, "", name)
+	print name
+	exit
+}' /proc/mtd)"
+[ -n "$MTD_NUM" ] || {
+	echo "error: ubi-bank1 was not found in /proc/mtd" >&2
+	exit 1
+}
+
+UBI_NUM=0
+while [ -e "/sys/class/ubi/ubi$UBI_NUM" ]; do
+	UBI_NUM=$((UBI_NUM + 1))
+done
+
+mkdir -p "$MOUNT"
+/usr/sbin/ubiattach /dev/ubi_ctrl -m "$MTD_NUM" -d "$UBI_NUM"
+
+cleanup()
+{
+	umount "$MOUNT" 2>/dev/null || true
+	/usr/sbin/ubidetach /dev/ubi_ctrl -d "$UBI_NUM" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+VOLUME=
+for node in /sys/class/ubi/ubi"$UBI_NUM"_*; do
+	[ -f "$node/name" ] || continue
+	case "$(cat "$node/name")" in
+		rootfs_ubifs|rootfs)
+			VOLUME="/dev/$(basename "$node")"
+			break
+			;;
+	esac
+done
+[ -n "$VOLUME" ] || {
+	echo "error: stock root filesystem volume was not found" >&2
+	exit 1
+}
+
+mount -t ubifs "$VOLUME" "$MOUNT"
+
+INITTAB="$MOUNT/etc/inittab"
+[ -f "$INITTAB" ] || {
+	echo "error: stock /etc/inittab was not found" >&2
+	exit 1
+}
+[ -x "$MOUNT/bin/pcb_cli" ] && [ -x "$MOUNT/bin/rui" ] || {
+	echo "error: this does not look like a supported DG2200TN stock rootfs" >&2
+	exit 1
+}
+
+if [ ! -f "$INITTAB.dg2200tn-backup" ]; then
+	if [ -f "$INITTAB.copilot-backup" ]; then
+		cp -p "$INITTAB.copilot-backup" "$INITTAB.dg2200tn-backup"
+	else
+		cp -p "$INITTAB" "$INITTAB.dg2200tn-backup"
+	fi
+fi
+
+if grep -qxF '::askfirst:-/bin/login' "$INITTAB"; then
+	sed 's|^::askfirst:-/bin/login$|::askfirst:-/bin/sh -i|' \
+		"$INITTAB" > "$INITTAB.new"
+	mv "$INITTAB.new" "$INITTAB"
+elif ! grep -qxF '::askfirst:-/bin/sh -i' "$INITTAB"; then
+	echo "error: unsupported stock console configuration" >&2
+	exit 1
+fi
+
+mkdir -p "$MOUNT/usr/sbin"
+cp "$HELPER" "$MOUNT/usr/sbin/dg2200tn-install-rui"
+chmod 0755 "$MOUNT/usr/sbin/dg2200tn-install-rui"
+
+sync
+echo "Stock UART root shell and guarded RUI installer are enabled."
+echo "Reboot without interrupting CFE, then use dg2200tn-install-rui in stock."

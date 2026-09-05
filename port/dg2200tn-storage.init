@@ -1,0 +1,117 @@
+#!/bin/sh /etc/rc.common
+
+START=95
+STOP=05
+
+find_mtd_number()
+{
+	sed -n \
+		's/^mtd\([0-9][0-9]*\):.*"persistent-ubi-writable"$/\1/p' \
+		/proc/mtd | head -n 1
+}
+
+find_ubi_device()
+{
+	local mtd_number="$1"
+	local path
+
+	for path in /sys/class/ubi/ubi[0-9]*; do
+		[ -f "$path/mtd_num" ] || continue
+		[ "$(cat "$path/mtd_num")" = "$mtd_number" ] || continue
+		printf '%s\n' "${path##*/}"
+		return 0
+	done
+	return 1
+}
+
+has_storage_volume()
+{
+	local ubi_device="$1"
+	local path
+
+	for path in "/sys/class/ubi/${ubi_device}_"*; do
+		[ -f "$path/name" ] || continue
+		[ "$(cat "$path/name")" = "storage" ] && return 0
+	done
+	return 1
+}
+
+mounted_storage()
+{
+	awk '
+		$2 == "/mnt/storage" {
+			count++
+			source = $1
+			type = $3
+		}
+		END {
+			if (count == 1)
+				print source " " type
+			else if (count > 1)
+				print "stacked " count
+		}
+	' /proc/mounts
+}
+
+start()
+{
+	local mtd_number
+	local mounted
+	local ubi_device
+
+	mtd_number="$(find_mtd_number)"
+	[ -n "$mtd_number" ] || {
+		logger -t dg2200tn-storage "persistent NAND partition not found"
+		return 1
+	}
+
+	ubi_device="$(find_ubi_device "$mtd_number")" || {
+		ubiattach -m "$mtd_number" >/dev/null || {
+			logger -t dg2200tn-storage "failed to attach mtd$mtd_number"
+			return 1
+		}
+		ubi_device="$(find_ubi_device "$mtd_number")" || return 1
+	}
+	has_storage_volume "$ubi_device" || {
+		logger -t dg2200tn-storage \
+			"storage volume is missing on $ubi_device"
+		return 1
+	}
+	mounted="$(mounted_storage)"
+	if [ -n "$mounted" ]; then
+		[ "$mounted" = "$ubi_device:storage ubifs" ] && return 0
+		logger -t dg2200tn-storage \
+			"refusing unexpected /mnt/storage mount: $mounted"
+		return 1
+	fi
+
+	mkdir -p /mnt/storage
+	mount -t ubifs -o noatime "$ubi_device:storage" /mnt/storage || {
+		logger -t dg2200tn-storage "failed to mount $ubi_device:storage"
+		return 1
+	}
+}
+
+stop()
+{
+	local mtd_number
+	local mounted
+	local ubi_device
+
+	mtd_number="$(find_mtd_number)"
+	[ -n "$mtd_number" ] || return 0
+	ubi_device="$(find_ubi_device "$mtd_number")" || ubi_device=
+	mounted="$(mounted_storage)"
+	if [ -n "$mounted" ]; then
+		[ -n "$ubi_device" ] &&
+			[ "$mounted" = "$ubi_device:storage ubifs" ] || {
+				logger -t dg2200tn-storage \
+					"refusing unexpected /mnt/storage mount: $mounted"
+				return 1
+			}
+		umount /mnt/storage || return 1
+	fi
+	[ -n "$ubi_device" ] &&
+		ubidetach -m "$mtd_number" >/dev/null 2>&1
+	return 0
+}
